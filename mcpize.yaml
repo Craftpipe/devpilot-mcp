@@ -1,0 +1,10 @@
+version: 1
+name: devpilot-mcp
+runtime: typescript
+entry: dist/index.js
+build:
+  install: npm ci
+  command: npx tsc
+startCommand:
+  type: stdio
+  command: node dist/index.js

@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d1117;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#161b22;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f97316;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#fb923c;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f97316;stop-opacity:0.25" />
+      <stop offset="100%" style="stop-color:#f97316;stop-opacity:0" />
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#f97316" flood-opacity="0.35"/>
+    </filter>
+    <filter id="textGlow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" fill="url(#bg)" rx="12" ry="12"/>
+
+  <!-- Subtle grid pattern -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#21262d" stroke-width="0.5"/>
+  </pattern>
+  <rect width="800" height="200" fill="url(#grid)" rx="12" ry="12" opacity="0.5"/>
+
+  <!-- Top accent line -->
+  <rect x="0" y="0" width="800" height="3" fill="url(#accent)" rx="1"/>
+
+  <!-- Glow effect behind icons -->
+  <ellipse cx="400" cy="148" rx="260" ry="55" fill="url(#glow)" opacity="0.5"/>
+
+  <!-- Deploy arrow icon (left) -->
+  <g transform="translate(224, 112)" filter="url(#shadow)">
+    <!-- Arrow up (deploy) -->
+    <rect x="13" y="16" width="10" height="22" rx="2" fill="none" stroke="#f97316" stroke-width="1.5" opacity="0.8"/>
+    <polygon points="18,0 6,18 12,18 12,16 24,16 24,18 30,18" fill="#f97316" opacity="0.8"/>
+    <text x="18" y="52" text-anchor="middle" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="9" fill="#8b949e">DEPLOY</text>
+  </g>
+
+  <!-- Error badge icon (center) -->
+  <g transform="translate(382, 112)" filter="url(#shadow)">
+    <!-- Octagon warning -->
+    <polygon points="11,0 25,0 36,11 36,25 25,36 11,36 0,25 0,11" fill="none" stroke="#f97316" stroke-width="1.5" opacity="0.8"/>
+    <text x="18" y="25" text-anchor="middle" font-family="'SF Mono','Fira Code',monospace" font-size="16" font-weight="bold" fill="#f97316" opacity="0.9">!</text>
+    <text x="18" y="52" text-anchor="middle" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="9" fill="#8b949e">ERRORS</text>
+  </g>
+
+  <!-- Health check pulse icon (right) -->
+  <g transform="translate(536, 112)" filter="url(#shadow)">
+    <!-- Pulse / heartbeat line -->
+    <polyline points="0,18 8,18 12,6 16,30 20,18 28,18 32,12 36,18" fill="none" stroke="#f97316" stroke-width="1.5" stroke-linejoin="round" opacity="0.8"/>
+    <text x="18" y="52" text-anchor="middle" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="9" fill="#8b949e">HEALTH</text>
+  </g>
+
+  <!-- Connection lines from title to icons -->
+  <line x1="318" y1="95" x2="242" y2="112" stroke="#f97316" stroke-width="1" opacity="0.25"/>
+  <line x1="400" y1="95" x2="400" y2="112" stroke="#f97316" stroke-width="1" opacity="0.25"/>
+  <line x1="482" y1="95" x2="554" y2="112" stroke="#f97316" stroke-width="1" opacity="0.25"/>
+
+  <!-- Pilot icon (nav arrow hint) -->
+  <g transform="translate(144, 36)">
+    <polygon points="0,18 10,0 20,18 10,12" fill="url(#accent)" opacity="0.85"/>
+    <rect x="6" y="18" width="8" height="6" rx="1" fill="#f97316" opacity="0.6"/>
+  </g>
+
+  <!-- Main title -->
+  <text x="400" y="55" text-anchor="middle" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="38" font-weight="bold" fill="#f0f6fc" filter="url(#textGlow)" letter-spacing="1">
+    DevPilot MCP
+  </text>
+
+  <!-- Subtitle -->
+  <text x="400" y="82" text-anchor="middle" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="14" fill="#8b949e" letter-spacing="3">
+    UNIFIED DEVOPS LIFECYCLE SERVER
+  </text>
+
+  <!-- Bottom accent line -->
+  <rect x="300" y="92" width="200" height="1" fill="url(#accent)" opacity="0.4"/>
+
+  <!-- Version badge -->
+  <g transform="translate(680, 15)">
+    <rect width="60" height="20" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="30" y="14" text-anchor="middle" font-family="'SF Mono','Fira Code',monospace" font-size="10" fill="#f97316">v1.0.0</text>
+  </g>
+
+  <!-- MCP badge -->
+  <g transform="translate(60, 15)">
+    <rect width="44" height="20" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="22" y="14" text-anchor="middle" font-family="'SF Mono','Fira Code',monospace" font-size="10" fill="#f97316">MCP</text>
+  </g>
+</svg>
