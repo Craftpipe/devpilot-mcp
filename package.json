@@ -1,5 +1,5 @@
 {
-  "name": "devpilot-mcp",
+  "name": "@craftpipe/devpilot-mcp",
   "version": "1.0.0",
   "description": "Unified DevOps lifecycle MCP server — GitHub Actions, Vercel, Railway, Sentry, health monitoring",
   "type": "module",
