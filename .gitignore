@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.js.map
+*.d.ts.map
+coverage/
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+Thumbs.db
