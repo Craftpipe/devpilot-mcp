@@ -7,7 +7,7 @@
 
 [![npm version](https://img.shields.io/npm/v/devpilot-mcp?style=flat-square&color=f97316&label=npm)](https://npmjs.com/package/devpilot-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-240%20passing-brightgreen?style=flat-square)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-3178c6?style=flat-square&logo=typescript&logoColor=white)]()
 [![Node](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)]()
 [![MCP](https://img.shields.io/badge/MCP-compatible-f97316?style=flat-square)]()
