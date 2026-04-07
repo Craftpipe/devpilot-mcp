@@ -115,13 +115,13 @@ export async function deployPipeline(
           input.branch
         );
 
-        let finalStatus = run.status;
-        let finalConclusion = run.conclusion ?? null;
+        let finalStatus: "queued" | "in_progress" | "completed" = run.status;
+        let finalConclusion: "success" | "failure" | "cancelled" | "timed_out" | null = run.conclusion ?? null;
 
         if (run.id && run.status !== "completed") {
           const polled = await pollTestCompletion(ci, input.repo, run.id, 600_000);
-          finalStatus = polled.status;
-          finalConclusion = polled.conclusion;
+          finalStatus = polled.status as typeof finalStatus;
+          finalConclusion = polled.conclusion as typeof finalConclusion;
         }
 
         const testPassed = finalStatus === "completed" && finalConclusion === "success";
