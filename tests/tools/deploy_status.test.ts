@@ -144,6 +144,145 @@ describe("deployStatus()", () => {
     });
   });
 
+  describe("error handling", () => {
+    it("throws when VERCEL_TOKEN is not set", async () => {
+      delete process.env.VERCEL_TOKEN;
+      await expect(
+        deployStatus({ provider: "vercel", project_id: "prj_test" })
+      ).rejects.toThrow();
+    });
+
+    it("throws when RAILWAY_TOKEN is not set", async () => {
+      delete process.env.RAILWAY_TOKEN;
+      await expect(
+        deployStatus({ provider: "railway", project_id: "prj_test" })
+      ).rejects.toThrow();
+    });
+
+    it("throws on Vercel API error (500)", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: { status: 500, ok: false, body: { error: "Internal Server Error" } },
+      });
+      await expect(
+        deployStatus({ provider: "vercel", project_id: "prj_err" })
+      ).rejects.toThrow();
+    });
+
+    it("creates audit log entry on error", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: { status: 500, ok: false, body: { error: "fail" } },
+      });
+
+      const logSpy = vi.spyOn(AuditLog.prototype, "log");
+
+      try {
+        await deployStatus({ provider: "vercel", project_id: "prj_fail" });
+      } catch {}
+
+      const failCall = logSpy.mock.calls.find((c) => c[0].success === false);
+      expect(failCall).toBeDefined();
+      expect(failCall![0].tool_name).toBe("deploy_status");
+      expect(failCall![0].result_summary).toContain("Error");
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("deployment field mapping", () => {
+    it("maps Vercel ERROR state to lowercase 'error'", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [{
+              uid: "dpl_err1", url: "err.vercel.app", state: "ERROR",
+              createdAt: 1700000000000,
+            }],
+          },
+        },
+      });
+
+      const result = await deployStatus({ provider: "vercel", project_id: "prj_test" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployments[0].state).toBe("error");
+    });
+
+    it("maps Vercel CANCELED state to lowercase 'canceled'", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [{
+              uid: "dpl_cancel", url: "cancel.vercel.app", state: "CANCELED",
+              createdAt: 1700000000000,
+            }],
+          },
+        },
+      });
+
+      const result = await deployStatus({ provider: "vercel", project_id: "prj_test" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployments[0].state).toBe("canceled");
+    });
+
+    it("prefixes URL with https:// when missing", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [{
+              uid: "dpl_url", url: "no-https.vercel.app", state: "READY",
+              createdAt: 1700000000000,
+            }],
+          },
+        },
+      });
+
+      const result = await deployStatus({ provider: "vercel", project_id: "prj_test" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployments[0].url).toMatch(/^https:\/\//);
+    });
+
+    it("handles deployment with missing branch info", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [{
+              uid: "dpl_nobranch", url: "app.vercel.app", state: "READY",
+              createdAt: 1700000000000,
+            }],
+          },
+        },
+      });
+
+      const result = await deployStatus({ provider: "vercel", project_id: "prj_test" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployments).toHaveLength(1);
+    });
+
+    it("handles deployment with missing environment info", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [{
+              uid: "dpl_noenv", url: "app.vercel.app", state: "BUILDING",
+              createdAt: 1700000000000,
+            }],
+          },
+        },
+      });
+
+      const result = await deployStatus({ provider: "vercel", project_id: "prj_test" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployments).toHaveLength(1);
+      expect(parsed.deployments[0].state).toBe("building");
+    });
+  });
+
   describe("provider: railway", () => {
     it("returns deployments from Railway via GraphQL", async () => {
       mockFetch.addRoute({
@@ -185,6 +324,20 @@ describe("deployStatus()", () => {
       expect(dep.id).toBe("rly_deploy_001");
       expect(dep.state).toBe("ready");
       expect(dep.provider).toBe("railway");
+    });
+
+    it("returns empty deployments for Railway when none exist", async () => {
+      mockFetch.addRoute({
+        url: /railway\.app\/graphql/,
+        method: "POST",
+        response: {
+          body: { data: { deployments: { edges: [] } } },
+        },
+      });
+
+      const result = await deployStatus({ provider: "railway", project_id: "rly_empty" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployments).toHaveLength(0);
     });
   });
 });

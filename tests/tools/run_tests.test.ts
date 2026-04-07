@@ -277,6 +277,112 @@ describe("runTests()", () => {
     });
   });
 
+  describe("additional error handling", () => {
+    it("throws on GitHub API 500 error", async () => {
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/ci\.yml\/dispatches/,
+        method: "POST",
+        response: { status: 500, ok: false, body: { message: "Server Error" } },
+      });
+      await expect(
+        runTests({ provider: "github-actions", repo: "org/repo" })
+      ).rejects.toThrow();
+    });
+
+    it("throws on GitHub API 403 Forbidden", async () => {
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/ci\.yml\/dispatches/,
+        method: "POST",
+        response: { status: 403, ok: false, body: { message: "Forbidden" } },
+      });
+      await expect(
+        runTests({ provider: "github-actions", repo: "org/repo" })
+      ).rejects.toThrow();
+    });
+
+    it("creates audit log entry on error", async () => {
+      delete process.env.GITHUB_TOKEN;
+      const logSpy = vi.spyOn(AuditLog.prototype, "log");
+
+      try {
+        await runTests({ provider: "github-actions", repo: "org/repo" });
+      } catch {}
+
+      const failCall = logSpy.mock.calls.find((c) => c[0].success === false);
+      expect(failCall).toBeDefined();
+      expect(failCall![0].tool_name).toBe("run_tests");
+      expect(failCall![0].result_summary).toContain("Error");
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("custom parameters", () => {
+    it("passes custom workflow name correctly", async () => {
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/test\.yml\/dispatches/,
+        method: "POST",
+        response: { status: 204, body: {} },
+      });
+
+      const futureTs = new Date(Date.now() + 60000).toISOString();
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/test\.yml\/runs/,
+        response: {
+          body: {
+            total_count: 1,
+            workflow_runs: [{
+              id: 88001, status: "queued", conclusion: null,
+              html_url: "https://github.com/org/repo/actions/runs/88001",
+              name: "Test", created_at: futureTs, updated_at: futureTs,
+            }],
+          },
+        },
+      });
+
+      const result = await runTests({
+        provider: "github-actions",
+        repo: "org/repo",
+        workflow: "test.yml",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.run.id).toBe(88001);
+    });
+
+    it("response includes provider and repo fields", async () => {
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/ci\.yml\/dispatches/,
+        method: "POST",
+        response: { status: 204, body: {} },
+      });
+
+      const futureTs = new Date(Date.now() + 60000).toISOString();
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/ci\.yml\/runs/,
+        response: {
+          body: {
+            total_count: 1,
+            workflow_runs: [{
+              id: 88002, status: "queued", conclusion: null,
+              html_url: "https://github.com/org/repo/actions/runs/88002",
+              name: "CI", created_at: futureTs, updated_at: futureTs,
+            }],
+          },
+        },
+      });
+
+      const result = await runTests({
+        provider: "github-actions",
+        repo: "my-org/my-repo",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.provider).toBe("github-actions");
+      expect(parsed.repo).toBe("my-org/my-repo");
+    });
+  });
+
   describe("rate limit / 403 handling", () => {
     it("retries on 429 rate limit and succeeds", async () => {
       let dispatchCalls = 0;

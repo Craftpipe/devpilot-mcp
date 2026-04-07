@@ -382,5 +382,118 @@ describe("incidentReport()", () => {
 
       logSpy.mockRestore();
     });
+
+    it("creates audit log entry on Sentry API error", async () => {
+      mockFetch.addRoute({
+        url: /sentry\.io.*\/issues\//,
+        response: { status: 500, ok: false, body: { detail: "Server Error" } },
+      });
+
+      const logSpy = vi.spyOn(AuditLog.prototype, "log");
+
+      try {
+        await incidentReport({ project_slug: "my-app", timeframe: "1h" });
+      } catch {}
+
+      const failCall = logSpy.mock.calls.find((c) => c[0].success === false);
+      expect(failCall).toBeDefined();
+      expect(failCall![0].tool_name).toBe("incident_report");
+      expect(failCall![0].result_summary).toContain("Error");
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("timeframe variations", () => {
+    it("works with 1h timeframe", async () => {
+      mockFetch.addRoute({ url: /sentry\.io.*\/issues\//, response: { body: [] } });
+      mockFetch.addRoute({ url: /\/v6\/deployments/, response: { body: { deployments: [] } } });
+
+      const result = await incidentReport({ project_slug: "my-app", timeframe: "1h" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.timeframe).toBe("1h");
+    });
+
+    it("works with 6h timeframe", async () => {
+      mockFetch.addRoute({ url: /sentry\.io.*\/issues\//, response: { body: [] } });
+      mockFetch.addRoute({ url: /\/v6\/deployments/, response: { body: { deployments: [] } } });
+
+      const result = await incidentReport({ project_slug: "my-app", timeframe: "6h" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.timeframe).toBe("6h");
+    });
+
+    it("works with 7d timeframe", async () => {
+      mockFetch.addRoute({ url: /sentry\.io.*\/issues\//, response: { body: [] } });
+      mockFetch.addRoute({ url: /\/v6\/deployments/, response: { body: { deployments: [] } } });
+
+      const result = await incidentReport({ project_slug: "my-app", timeframe: "7d" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.timeframe).toBe("7d");
+    });
+  });
+
+  describe("summary structure", () => {
+    it("summary includes all required fields", async () => {
+      mockFetch.addRoute({
+        url: /sentry\.io.*\/issues\//,
+        response: {
+          body: [{
+            id: "issue_sum", title: "Error", culprit: "app.ts", count: "1",
+            firstSeen: "2024-01-15T10:00:00.000Z", lastSeen: "2024-01-15T10:00:00.000Z",
+            level: "error", shortId: "MY-APP-SUM",
+          }],
+        },
+      });
+      mockFetch.addRoute({ url: /\/v6\/deployments/, response: { body: { deployments: [] } } });
+
+      const result = await incidentReport({ project_slug: "my-app", timeframe: "24h" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.summary).toHaveProperty("total_errors");
+      expect(parsed.summary).toHaveProperty("total_deploys");
+      expect(parsed.summary).toHaveProperty("correlated");
+      expect(parsed.summary).toHaveProperty("high_confidence");
+      expect(parsed.summary.total_errors).toBe(1);
+    });
+
+    it("timeline is returned as array", async () => {
+      mockFetch.addRoute({ url: /sentry\.io.*\/issues\//, response: { body: [] } });
+      mockFetch.addRoute({ url: /\/v6\/deployments/, response: { body: { deployments: [] } } });
+
+      const result = await incidentReport({ project_slug: "my-app", timeframe: "1h" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(Array.isArray(parsed.timeline)).toBe(true);
+    });
+
+    it("response includes project_slug", async () => {
+      mockFetch.addRoute({ url: /sentry\.io.*\/issues\//, response: { body: [] } });
+      mockFetch.addRoute({ url: /\/v6\/deployments/, response: { body: { deployments: [] } } });
+
+      const result = await incidentReport({ project_slug: "test-slug", timeframe: "1h" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.project_slug).toBe("test-slug");
+    });
+  });
+
+  describe("Vercel deploy fetch fallback", () => {
+    it("silently skips deploy fetch when VERCEL_TOKEN not set", async () => {
+      delete process.env.VERCEL_TOKEN;
+
+      mockFetch.addRoute({
+        url: /sentry\.io.*\/issues\//,
+        response: {
+          body: [{
+            id: "issue_novercel", title: "Error", culprit: "app.ts", count: "1",
+            firstSeen: "2024-01-15T10:00:00.000Z", lastSeen: "2024-01-15T10:00:00.000Z",
+            level: "error", shortId: "MY-APP-NV",
+          }],
+        },
+      });
+
+      const result = await incidentReport({ project_slug: "my-app", timeframe: "1h" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.summary.total_deploys).toBe(0);
+      expect(parsed.summary.total_errors).toBe(1);
+    });
   });
 });

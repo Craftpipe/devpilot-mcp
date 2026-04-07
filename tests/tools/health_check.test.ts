@@ -207,6 +207,69 @@ describe("healthCheck()", () => {
     });
   });
 
+  describe("edge cases", () => {
+    it("handles empty URL array", async () => {
+      const result = await healthCheck({ urls: [] });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.summary.total).toBe(0);
+      expect(parsed.summary.up).toBe(0);
+      expect(parsed.summary.down).toBe(0);
+    });
+
+    it("single URL check works correctly", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true, status: 200, statusText: "OK", headers: new Headers(),
+      } as unknown as Response);
+
+      const result = await healthCheck({ urls: ["https://single.example.com"] });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].url).toBe("https://single.example.com");
+      expect(parsed.summary.total).toBe(1);
+    });
+
+    it("timeout_ms in response matches input timeout", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true, status: 200, statusText: "OK", headers: new Headers(),
+      } as unknown as Response);
+
+      const result = await healthCheck({ urls: ["https://example.com"], timeout: 8000 });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.timeout_ms).toBe(8000);
+    });
+
+    it("response_time_ms is non-negative", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true, status: 200, statusText: "OK", headers: new Headers(),
+      } as unknown as Response);
+
+      const result = await healthCheck({ urls: ["https://example.com"] });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.results[0].response_time_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it("response_time_ms is populated even on error", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+      const result = await healthCheck({ urls: ["https://fail.example.com"] });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(typeof parsed.results[0].response_time_ms).toBe("number");
+      expect(parsed.results[0].response_time_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it("handles 404 as down status", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false, status: 404, statusText: "Not Found", headers: new Headers(),
+      } as unknown as Response);
+
+      const result = await healthCheck({ urls: ["https://missing.example.com"] });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.results[0].status).toBe("down");
+      expect(parsed.results[0].status_code).toBe(404);
+    });
+  });
+
   describe("audit logging", () => {
     it("creates an audit log entry on successful check", async () => {
       globalThis.fetch = vi.fn().mockResolvedValueOnce({

@@ -261,5 +261,109 @@ describe("rollbackDeploy()", () => {
 
       logSpy.mockRestore();
     });
+
+    it("creates audit log entry on error", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: { body: { deployments: [] } },
+      });
+
+      const logSpy = vi.spyOn(AuditLog.prototype, "log");
+
+      try {
+        await rollbackDeploy({ provider: "vercel", project_id: "prj_err" });
+      } catch {}
+
+      const failCall = logSpy.mock.calls.find((c) => c[0].success === false);
+      expect(failCall).toBeDefined();
+      expect(failCall![0].tool_name).toBe("rollback_deploy");
+      expect(failCall![0].result_summary).toContain("Error");
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("additional error handling", () => {
+    it("throws when VERCEL_TOKEN is not set", async () => {
+      delete process.env.VERCEL_TOKEN;
+      await expect(
+        rollbackDeploy({ provider: "vercel", project_id: "prj_test", deployment_id: "dpl_1" })
+      ).rejects.toThrow();
+    });
+
+    it("throws when RAILWAY_TOKEN is not set", async () => {
+      delete process.env.RAILWAY_TOKEN;
+      await expect(
+        rollbackDeploy({ provider: "railway", project_id: "prj_test", deployment_id: "dpl_1" })
+      ).rejects.toThrow();
+    });
+
+    it("throws on Vercel rollback API 500 error", async () => {
+      mockFetch.addRoute({
+        url: /\/v10\/projects\/.*\/promote/,
+        method: "POST",
+        response: { status: 500, ok: false, body: { error: "Internal Server Error" } },
+      });
+
+      await expect(
+        rollbackDeploy({ provider: "vercel", project_id: "prj_test", deployment_id: "dpl_fail" })
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("auto-select with multiple deployments", () => {
+    it("selects index [1] when 3+ deployments exist", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [
+              { uid: "dpl_current", url: "current.vercel.app", state: "READY", meta: {}, target: "production", createdAt: Date.now() },
+              { uid: "dpl_previous", url: "prev.vercel.app", state: "READY", meta: {}, target: "production", createdAt: Date.now() - 100000 },
+              { uid: "dpl_oldest", url: "old.vercel.app", state: "READY", meta: {}, target: "production", createdAt: Date.now() - 200000 },
+            ],
+          },
+        },
+      });
+
+      // Rollback promotes dpl_previous (index 1)
+      mockFetch.addRoute({
+        url: /\/v10\/projects\/prj_multi\/promote\/dpl_previous/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_previous", url: "prev.vercel.app", state: "READY",
+            meta: {}, target: "production", createdAt: Date.now(),
+          },
+        },
+      });
+
+      const result = await rollbackDeploy({ provider: "vercel", project_id: "prj_multi" });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployment.id).toBe("dpl_previous");
+    });
+  });
+
+  describe("response structure", () => {
+    it("includes provider and project_id in response", async () => {
+      mockFetch.addRoute({
+        url: /\/v10\/projects\/prj_resp\/promote\/dpl_resp/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_resp", url: "resp.vercel.app", state: "READY",
+            meta: {}, target: "production", createdAt: Date.now(),
+          },
+        },
+      });
+
+      const result = await rollbackDeploy({
+        provider: "vercel", project_id: "prj_resp", deployment_id: "dpl_resp",
+      });
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.provider).toBe("vercel");
+      expect(parsed.project_id).toBe("prj_resp");
+      expect(parsed.deployment).toBeDefined();
+    });
   });
 });

@@ -344,4 +344,258 @@ describe("deployPipeline()", () => {
       expect(parsed.steps[0].status).toBe("failure");
     });
   });
+
+  describe("deploy trigger failure", () => {
+    it("returns failure when Vercel deploy trigger returns 500", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: { status: 500, ok: false, body: { error: "Internal Server Error" } },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "vercel",
+        project_id: "prj_deploy_fail",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.overall_status).toBe("failure");
+      expect(parsed.failure_reason).toContain("Deploy trigger failed");
+      expect(parsed.steps).toHaveLength(1);
+      expect(parsed.steps[0].name).toBe("trigger_deploy");
+      expect(parsed.steps[0].status).toBe("failure");
+    });
+  });
+
+  describe("Sentry error check step", () => {
+    it("fails pipeline when Sentry detects new errors after deployment", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_sentry_001", url: "app.vercel.app", state: "QUEUED",
+            meta: { githubCommitRef: "main" }, target: "production",
+            createdAt: Date.now(),
+          },
+        },
+      });
+
+      mockFetch.addRoute({
+        url: /sentry\.io\/api\/.*\/issues/,
+        response: {
+          body: [
+            { id: "err_1", title: "TypeError", count: "5", level: "error", culprit: "app.js", firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString() },
+            { id: "err_2", title: "ReferenceError", count: "2", level: "error", culprit: "lib.js", firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString() },
+          ],
+        },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "vercel",
+        project_id: "prj_sentry_fail",
+        sentry_project_slug: "my-project",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.overall_status).toBe("failure");
+      expect(parsed.failure_reason).toContain("error(s) detected");
+      const errorStep = parsed.steps.find((s: { name: string }) => s.name === "error_check");
+      expect(errorStep).toBeDefined();
+      expect(errorStep.status).toBe("failure");
+    });
+
+    it("skips error check on Sentry API failure (best-effort)", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_sentry_skip", url: "app.vercel.app", state: "QUEUED",
+            meta: { githubCommitRef: "main" }, target: "production",
+            createdAt: Date.now(),
+          },
+        },
+      });
+
+      mockFetch.addRoute({
+        url: /sentry\.io\/api\/.*\/issues/,
+        response: { status: 500, ok: false, body: { detail: "Internal Error" } },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "vercel",
+        project_id: "prj_sentry_skip",
+        sentry_project_slug: "my-project",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.overall_status).toBe("success");
+      const errorStep = parsed.steps.find((s: { name: string }) => s.name === "error_check");
+      expect(errorStep).toBeDefined();
+      expect(errorStep.status).toBe("skipped");
+    });
+  });
+
+  describe("full pipeline with all 4 steps passing", () => {
+    it("succeeds when tests + deploy + health + error check all pass", async () => {
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/ci\.yml\/dispatches/,
+        method: "POST",
+        response: { status: 204, body: {} },
+      });
+
+      const futureTime = new Date(Date.now() + 60000).toISOString();
+      mockFetch.addRoute({
+        url: /\/actions\/workflows\/ci\.yml\/runs/,
+        response: {
+          body: {
+            total_count: 1,
+            workflow_runs: [{
+              id: 55555, status: "completed", conclusion: "success",
+              html_url: "https://github.com/org/repo/actions/runs/55555",
+              name: "CI", created_at: futureTime, updated_at: futureTime,
+            }],
+          },
+        },
+      });
+
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_full_pass", url: "full.vercel.app", state: "QUEUED",
+            meta: { githubCommitRef: "main" }, target: "production",
+            createdAt: Date.now(),
+          },
+        },
+      });
+
+      mockFetch.addRoute({
+        url: /https:\/\/full\.example\.com/,
+        response: { status: 200, body: {} },
+      });
+
+      mockFetch.addRoute({
+        url: /sentry\.io\/api\/.*\/issues/,
+        response: { body: [] },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "vercel",
+        project_id: "prj_full_pass",
+        test_workflow: "ci.yml",
+        health_url: "https://full.example.com",
+        sentry_project_slug: "my-project",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.overall_status).toBe("success");
+      expect(parsed.steps).toHaveLength(4);
+      expect(parsed.steps.map((s: { name: string }) => s.name)).toEqual([
+        "run_tests", "trigger_deploy", "health_check", "error_check",
+      ]);
+      expect(parsed.steps.every((s: { status: string }) => s.status === "success")).toBe(true);
+      expect(parsed.failure_reason).toBeUndefined();
+    });
+  });
+
+  describe("step duration and structure", () => {
+    it("all steps have duration_ms >= 0 and total_duration_ms >= 0", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_dur", url: "dur.vercel.app", state: "QUEUED",
+            meta: { githubCommitRef: "main" }, target: "production",
+            createdAt: Date.now(),
+          },
+        },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "vercel",
+        project_id: "prj_dur",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      for (const step of parsed.steps) {
+        expect(step.duration_ms).toBeGreaterThanOrEqual(0);
+        expect(step.result).toBeDefined();
+      }
+      expect(parsed.total_duration_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it("step result includes deployment data on success", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_result_check", url: "result.vercel.app", state: "QUEUED",
+            meta: { githubCommitRef: "main" }, target: "production",
+            createdAt: Date.now(),
+          },
+        },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "vercel",
+        project_id: "prj_result",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      const deployStep = parsed.steps[0];
+      expect(deployStep.result.deployment_id).toBe("dpl_result_check");
+      expect(deployStep.result.url).toContain("result.vercel.app");
+    });
+  });
+
+  describe("Railway provider pipeline", () => {
+    it("succeeds with Railway as deployment provider", async () => {
+      mockFetch.addRoute({
+        url: /railway\.app\/graphql/,
+        method: "POST",
+        response: {
+          body: {
+            data: {
+              deploymentCreate: {
+                id: "rly_dpl_001",
+                status: "BUILDING",
+                staticUrl: "https://app.railway.app",
+                createdAt: new Date().toISOString(),
+                meta: { branch: "main" },
+                environment: { name: "production" },
+              },
+            },
+          },
+        },
+      });
+
+      const result = await deployPipeline({
+        repo: "org/repo",
+        branch: "main",
+        provider: "railway",
+        project_id: "rly_proj",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.overall_status).toBe("success");
+      expect(parsed.steps[0].name).toBe("trigger_deploy");
+    });
+  });
 });

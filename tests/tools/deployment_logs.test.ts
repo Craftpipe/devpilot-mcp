@@ -271,5 +271,101 @@ describe("deploymentLogs()", () => {
         })
       ).rejects.toThrow("Vercel API error (404)");
     });
+
+    it("throws when neither deployment_id nor project_id provided", async () => {
+      await expect(
+        deploymentLogs({ provider: "vercel" })
+      ).rejects.toThrow("deployment_id is required");
+    });
+
+    it("creates audit log entry on error", async () => {
+      const logSpy = vi.spyOn(AuditLog.prototype, "log");
+
+      try {
+        await deploymentLogs({ provider: "vercel" });
+      } catch {}
+
+      const failCall = logSpy.mock.calls.find((c) => c[0].success === false);
+      expect(failCall).toBeDefined();
+      expect(failCall![0].tool_name).toBe("deployment_logs");
+      expect(failCall![0].result_summary).toContain("Error");
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("auto-resolution via project_id", () => {
+    it("auto-resolves deployment_id from project_id", async () => {
+      // First call: getDeployments
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: {
+          body: {
+            deployments: [{
+              uid: "dpl_auto_resolved",
+              url: "auto.vercel.app",
+              state: "READY",
+              meta: { githubCommitRef: "main" },
+              target: "production",
+              createdAt: Date.now(),
+            }],
+          },
+        },
+      });
+
+      // Second call: getLogs for the auto-resolved deployment
+      mockFetch.addRoute({
+        url: /\/v3\/deployments\/dpl_auto_resolved\/events/,
+        response: {
+          body: [
+            { id: "evt_1", date: Date.now(), text: "Build started", proxy: { timestamp: Date.now() } },
+          ],
+        },
+      });
+
+      const result = await deploymentLogs({
+        provider: "vercel",
+        project_id: "prj_auto",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployment_id).toBe("dpl_auto_resolved");
+      expect(parsed.logs).toHaveLength(1);
+    });
+
+    it("throws when project_id has no deployments", async () => {
+      mockFetch.addRoute({
+        url: /\/v6\/deployments/,
+        response: { body: { deployments: [] } },
+      });
+
+      await expect(
+        deploymentLogs({ provider: "vercel", project_id: "prj_empty" })
+      ).rejects.toThrow("No deployments found");
+    });
+  });
+
+  describe("response structure", () => {
+    it("includes provider, deployment_id, and lines_requested", async () => {
+      mockFetch.addRoute({
+        url: /\/v3\/deployments\/dpl_struct\/events/,
+        response: {
+          body: [
+            { id: "evt_1", date: Date.now(), text: "Log line", proxy: { timestamp: Date.now() } },
+          ],
+        },
+      });
+
+      const result = await deploymentLogs({
+        provider: "vercel",
+        deployment_id: "dpl_struct",
+        lines: 50,
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.provider).toBe("vercel");
+      expect(parsed.deployment_id).toBe("dpl_struct");
+      expect(parsed.lines_requested).toBe(50);
+    });
   });
 });

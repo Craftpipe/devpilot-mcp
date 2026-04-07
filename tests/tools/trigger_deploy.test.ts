@@ -291,4 +291,92 @@ describe("triggerDeploy()", () => {
       globalThis.fetch = originalFetch;
     });
   });
+
+  describe("additional error handling", () => {
+    it("throws on Vercel 401 Unauthorized", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: { status: 401, ok: false, body: { error: "Unauthorized" } },
+      });
+      await expect(
+        triggerDeploy({ provider: "vercel", project_id: "prj_unauth" })
+      ).rejects.toThrow();
+    });
+
+    it("throws on Vercel 403 Forbidden", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: { status: 403, ok: false, body: { error: "Forbidden" } },
+      });
+      await expect(
+        triggerDeploy({ provider: "vercel", project_id: "prj_forbidden" })
+      ).rejects.toThrow();
+    });
+
+    it("creates audit log entry on error", async () => {
+      delete process.env.VERCEL_TOKEN;
+      const logSpy = vi.spyOn(AuditLog.prototype, "log");
+
+      try {
+        await triggerDeploy({ provider: "vercel", project_id: "prj_err" });
+      } catch {}
+
+      const failCall = logSpy.mock.calls.find((c) => c[0].success === false);
+      expect(failCall).toBeDefined();
+      expect(failCall![0].tool_name).toBe("trigger_deploy");
+
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("environment and response structure", () => {
+    it("passes staging environment correctly", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_staging", url: "staging.vercel.app", state: "QUEUED",
+            meta: { githubCommitRef: "develop" }, target: "staging",
+            createdAt: Date.now(),
+          },
+        },
+      });
+
+      const result = await triggerDeploy({
+        provider: "vercel",
+        project_id: "prj_stage",
+        branch: "develop",
+        environment: "staging",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.deployment).toBeDefined();
+      expect(parsed.deployment.id).toBe("dpl_staging");
+    });
+
+    it("response includes provider field", async () => {
+      mockFetch.addRoute({
+        url: /\/v13\/deployments/,
+        method: "POST",
+        response: {
+          body: {
+            uid: "dpl_prov", url: "prov.vercel.app", state: "QUEUED",
+            meta: {}, target: "production", createdAt: Date.now(),
+          },
+        },
+      });
+
+      const result = await triggerDeploy({
+        provider: "vercel",
+        project_id: "prj_prov",
+      });
+
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed.provider).toBe("vercel");
+      expect(parsed.deployment.provider).toBe("vercel");
+    });
+  });
 });
