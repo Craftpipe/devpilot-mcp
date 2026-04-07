@@ -11,7 +11,56 @@ import { VercelAdapter } from "../adapters/vercel.js";
 import { RailwayAdapter } from "../adapters/railway.js";
 import { HealthAdapter } from "../adapters/health.js";
 import { SentryAdapter } from "../adapters/sentry.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
+
+const POLL_INTERVAL_MS = 10_000; // 10 seconds between polls
+
+/** Poll a GitHub Actions run until it completes or the timeout elapses. */
+async function pollTestCompletion(
+  ci: GitHubActionsAdapter,
+  repo: string,
+  runId: number,
+  timeoutMs = 600_000 // 10 minutes
+): Promise<{ status: string; conclusion: string | null }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const run = await ci.getWorkflowStatus(repo, runId);
+    if (run.status === "completed") {
+      return { status: run.status, conclusion: run.conclusion ?? null };
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  throw new Error(
+    `Test run ${runId} did not complete within ${timeoutMs / 60_000} minutes (timeout).`
+  );
+}
+
+/** Poll a deployment until it reaches "ready"/"error"/"canceled" or the timeout elapses. */
+async function pollDeployReadiness(
+  adapter: VercelAdapter | RailwayAdapter,
+  projectId: string,
+  deploymentId: string,
+  timeoutMs = 300_000 // 5 minutes
+): Promise<{ state: string }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const deployments = await adapter.getDeployments(projectId);
+    const deployment = deployments.find((d) => d.id === deploymentId);
+    if (deployment) {
+      if (
+        deployment.state === "ready" ||
+        deployment.state === "error" ||
+        deployment.state === "canceled"
+      ) {
+        return { state: deployment.state };
+      }
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  throw new Error(
+    `Deployment ${deploymentId} did not reach a terminal state within ${timeoutMs / 60_000} minutes (timeout).`
+  );
+}
 
 export interface DeployPipelineInput {
   repo: string;
@@ -48,7 +97,7 @@ export async function deployPipeline(
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
   requirePro("deploy_pipeline");
 
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const pipelineStart = Date.now();
   const steps: PipelineStep[] = [];
 
@@ -58,20 +107,30 @@ export async function deployPipeline(
       const testStart = Date.now();
       try {
         const ci = new GitHubActionsAdapter();
+        // triggerWorkflow returns immediately once the run is queued/started.
+        // Poll until completion (10s intervals, 10min timeout).
         const run = await ci.triggerWorkflow(
           input.repo,
           input.test_workflow,
           input.branch
         );
 
-        const testPassed =
-          run.status === "completed" && run.conclusion === "success";
+        let finalStatus = run.status;
+        let finalConclusion = run.conclusion ?? null;
+
+        if (run.id && run.status !== "completed") {
+          const polled = await pollTestCompletion(ci, input.repo, run.id, 600_000);
+          finalStatus = polled.status;
+          finalConclusion = polled.conclusion;
+        }
+
+        const testPassed = finalStatus === "completed" && finalConclusion === "success";
 
         steps.push({
           name: "run_tests",
           status: testPassed ? "success" : "failure",
           duration_ms: Date.now() - testStart,
-          result: { run_id: run.id, status: run.status, conclusion: run.conclusion },
+          result: { run_id: run.id, status: finalStatus, conclusion: finalConclusion },
         });
 
         if (!testPassed) {
@@ -79,7 +138,7 @@ export async function deployPipeline(
             steps,
             overall_status: "failure",
             total_duration_ms: Date.now() - pipelineStart,
-            failure_reason: `Tests failed — workflow run ${run.id}: ${run.conclusion ?? run.status}`,
+            failure_reason: `Tests failed — workflow run ${run.id}: ${finalConclusion ?? finalStatus}`,
           });
         }
       } catch (err: unknown) {
@@ -99,7 +158,7 @@ export async function deployPipeline(
       }
     }
 
-    // Step 2: Trigger deployment
+    // Step 2: Trigger deployment and poll for readiness (10s intervals, 5min timeout).
     const deployStart = Date.now();
     let deploymentId: string | undefined;
     let deploymentUrl: string | undefined;
@@ -117,6 +176,39 @@ export async function deployPipeline(
       deploymentId = deployment.id;
       deploymentUrl = deployment.url;
 
+      // Poll until the deployment reaches a terminal state (ready/error/canceled).
+      // If polling itself fails (e.g. transient API error), proceed optimistically
+      // with the initial state so the pipeline is not aborted unnecessarily.
+      let finalState = deployment.state;
+      if (
+        deployment.state !== "ready" &&
+        deployment.state !== "error" &&
+        deployment.state !== "canceled"
+      ) {
+        try {
+          const polled = await pollDeployReadiness(adapter, input.project_id, deployment.id, 300_000);
+          finalState = polled.state as typeof deployment.state;
+        } catch {
+          // Polling failed — continue with the initial state (treat as still deploying/queued)
+          // The health check in the next step will confirm actual readiness.
+        }
+      }
+
+      if (finalState === "error" || finalState === "canceled") {
+        steps.push({
+          name: "trigger_deploy",
+          status: "failure",
+          duration_ms: Date.now() - deployStart,
+          result: { deployment_id: deployment.id, url: deployment.url, state: finalState },
+        });
+        return success({
+          steps,
+          overall_status: "failure",
+          total_duration_ms: Date.now() - pipelineStart,
+          failure_reason: `Deployment ${deployment.id} ended with state: ${finalState}`,
+        });
+      }
+
       steps.push({
         name: "trigger_deploy",
         status: "success",
@@ -124,7 +216,7 @@ export async function deployPipeline(
         result: {
           deployment_id: deployment.id,
           url: deployment.url,
-          state: deployment.state,
+          state: finalState,
         },
       });
     } catch (err: unknown) {
@@ -258,7 +350,5 @@ export async function deployPipeline(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

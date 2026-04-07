@@ -7,10 +7,11 @@
 import { requirePro } from "./gate.js";
 import { VercelAdapter } from "../adapters/vercel.js";
 import { RailwayAdapter } from "../adapters/railway.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 
 export interface EnvironmentSyncInput {
   provider: "vercel" | "railway";
+  project_id?: string;
   environments: string[];
 }
 
@@ -43,7 +44,7 @@ export async function environmentSync(
     );
   }
 
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   try {
@@ -56,9 +57,17 @@ export async function environmentSync(
     const envVarsByEnvironment: Map<string, Set<string>> = new Map();
 
     for (const env of input.environments) {
-      // getEnvironmentVars uses project_id; here we use environment name as the ID
-      const vars = await adapter.getEnvironmentVars(env);
-      envVarsByEnvironment.set(env, new Set(vars.map((v) => v.key)));
+      // When project_id is provided, fetch all vars for the project and filter by
+      // target environment. When omitted, fall back to using the environment name
+      // directly as the project identifier (legacy behaviour).
+      const fetchId = input.project_id ?? env;
+      const vars = await adapter.getEnvironmentVars(fetchId);
+      const envVars = input.project_id
+        ? vars.filter(
+            (v) => !v.target || v.target.length === 0 || v.target.includes(env)
+          )
+        : vars;
+      envVarsByEnvironment.set(env, new Set(envVars.map((v) => v.key)));
     }
 
     // Collect all unique keys across all environments
@@ -127,6 +136,7 @@ export async function environmentSync(
       provider: input.provider,
       input_summary: audit.sanitize({
         provider: input.provider,
+        project_id: input.project_id,
         environments: input.environments,
       }),
       result_summary: `${allKeys.size} keys across ${input.environments.length} environments — ${inAll} in all, ${missingInSome + onlyInOne} differ`,
@@ -145,6 +155,7 @@ export async function environmentSync(
       provider: input.provider,
       input_summary: audit.sanitize({
         provider: input.provider,
+        project_id: input.project_id,
         environments: input.environments,
       }),
       result_summary: `Error: ${message}`,
@@ -153,7 +164,5 @@ export async function environmentSync(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

@@ -6,7 +6,7 @@
 
 import { VercelAdapter } from "../adapters/vercel.js";
 import { RailwayAdapter } from "../adapters/railway.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { Deployment, DeployOpts } from "../types.js";
 
 export interface TriggerDeployInput {
@@ -24,7 +24,7 @@ export interface TriggerDeployOutput {
 export async function triggerDeploy(
   input: TriggerDeployInput
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   try {
@@ -80,7 +80,5 @@ export async function triggerDeploy(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

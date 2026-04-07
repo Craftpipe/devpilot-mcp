@@ -47,6 +47,36 @@ const SENSITIVE_PATTERNS = [
   /private/i,
 ];
 
+// Module-level singleton — opened once, reused across all tool calls.
+let _instance: AuditLog | null = null;
+
+/**
+ * Return the shared AuditLog singleton, creating it on first call (lazy init).
+ * Callers should use this instead of `new AuditLog()` to avoid opening a new
+ * SQLite connection per tool invocation.
+ */
+export function getAuditLog(): AuditLog {
+  if (!_instance) {
+    _instance = new AuditLog();
+  }
+  return _instance;
+}
+
+/**
+ * Reset the singleton — intended for test isolation only.
+ * Closes the existing connection (if any) and clears the cached instance.
+ */
+export function resetAuditLogSingleton(): void {
+  if (_instance) {
+    try {
+      _instance.close();
+    } catch {
+      // Ignore close errors during test teardown
+    }
+    _instance = null;
+  }
+}
+
 export class AuditLog {
   private readonly db: Database.Database;
 
@@ -79,7 +109,7 @@ export class AuditLog {
       CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_log(tool_name);
     `);
 
-    // 90-day cleanup on init (Fix 10)
+    // 90-day cleanup on init
     this.db.exec(
       "DELETE FROM audit_log WHERE timestamp < datetime('now', '-90 days')"
     );
@@ -154,6 +184,11 @@ export class AuditLog {
     return this.db.prepare(sql).all(...params, limit) as AuditRow[];
   }
 
+  /**
+   * Close the underlying SQLite connection.
+   * NOTE: Do not call this on the singleton returned by getAuditLog() — it will
+   * break subsequent log writes. This method is retained for test isolation only.
+   */
   close(): void {
     this.db.close();
   }

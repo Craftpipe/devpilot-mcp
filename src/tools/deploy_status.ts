@@ -6,7 +6,7 @@
 
 import { VercelAdapter } from "../adapters/vercel.js";
 import { RailwayAdapter } from "../adapters/railway.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { Deployment } from "../types.js";
 
 export interface DeployStatusInput {
@@ -23,7 +23,7 @@ export interface DeployStatusOutput {
 export async function deployStatus(
   input: DeployStatusInput
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   try {
@@ -65,7 +65,5 @@ export async function deployStatus(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

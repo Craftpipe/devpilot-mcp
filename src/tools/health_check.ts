@@ -6,7 +6,7 @@
  */
 
 import { HealthAdapter } from "../adapters/health.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { HealthResult } from "../types.js";
 
 export interface HealthCheckInput {
@@ -28,7 +28,7 @@ export interface HealthCheckOutput {
 export async function healthCheck(
   input: HealthCheckInput
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   const timeout = input.timeout ?? 5000;
@@ -83,7 +83,5 @@ export async function healthCheck(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

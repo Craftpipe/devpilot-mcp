@@ -5,7 +5,7 @@
  */
 
 import { GitHubActionsAdapter } from "../adapters/github-actions.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { WorkflowRun } from "../types.js";
 
 export interface RunTestsInput {
@@ -24,7 +24,7 @@ export interface RunTestsOutput {
 export async function runTests(
   input: RunTestsInput
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   const workflow = input.workflow ?? "ci.yml";
@@ -76,7 +76,5 @@ export async function runTests(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

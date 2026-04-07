@@ -10,13 +10,16 @@ import { AuditLog } from "../../src/lib/audit.js";
 
 vi.mock("../../src/lib/audit.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/lib/audit.js")>();
+  class MockAuditLog extends actual.AuditLog {
+    constructor() {
+      super(":memory:");
+    }
+  }
   return {
     ...actual,
-    AuditLog: class MockAuditLog extends actual.AuditLog {
-      constructor() {
-        super(":memory:");
-      }
-    },
+    AuditLog: MockAuditLog,
+    getAuditLog: () => new MockAuditLog(),
+    resetAuditLogSingleton: () => {},
   };
 });
 

@@ -7,7 +7,7 @@
 import { requirePro } from "./gate.js";
 import { VercelAdapter } from "../adapters/vercel.js";
 import { RailwayAdapter } from "../adapters/railway.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { Deployment } from "../types.js";
 
 export interface RollbackDeployInput {
@@ -27,7 +27,7 @@ export async function rollbackDeploy(
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
   requirePro("rollback_deploy");
 
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   const deploymentId = input.deployment_id ?? "";
@@ -93,7 +93,5 @@ export async function rollbackDeploy(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

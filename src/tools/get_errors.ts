@@ -6,7 +6,7 @@
  */
 
 import { SentryAdapter } from "../adapters/sentry.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { ErrorEvent } from "../types.js";
 
 export interface GetErrorsInput {
@@ -25,7 +25,7 @@ export interface GetErrorsOutput {
 export async function getErrors(
   input: GetErrorsInput
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   if (!input.project_slug) {
@@ -82,7 +82,5 @@ export async function getErrors(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

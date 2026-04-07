@@ -8,12 +8,13 @@
 import { requirePro } from "./gate.js";
 import { SentryAdapter } from "../adapters/sentry.js";
 import { VercelAdapter } from "../adapters/vercel.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import { correlate, buildTimeline } from "../lib/correlator.js";
 import type { Correlation } from "../types.js";
 
 export interface IncidentReportInput {
   project_slug: string;
+  vercel_project_id?: string;
   timeframe: "1h" | "6h" | "24h" | "7d";
   include_deploys?: boolean;
 }
@@ -43,19 +44,21 @@ export async function incidentReport(
     );
   }
 
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
 
   try {
     const sentry = new SentryAdapter();
     const errors = await sentry.getErrors(input.project_slug, input.timeframe, 50);
 
-    // Fetch recent deployments for correlation (uses Vercel if token is available)
+    // Fetch recent deployments for correlation (uses Vercel if token is available).
+    // Use vercel_project_id when provided; fall back to project_slug only as a last resort.
     let deployments: import("../types.js").Deployment[] = [];
     if (input.include_deploys !== false) {
       try {
         const vercel = new VercelAdapter();
-        deployments = await vercel.getDeployments(input.project_slug);
+        const vercelId = input.vercel_project_id ?? input.project_slug;
+        deployments = await vercel.getDeployments(vercelId);
       } catch {
         // Deployments are optional — if Vercel token not set, skip silently
         deployments = [];
@@ -110,7 +113,5 @@ export async function incidentReport(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

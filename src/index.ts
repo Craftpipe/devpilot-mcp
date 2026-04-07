@@ -86,13 +86,17 @@ server.tool(
 
 server.tool(
   'deployment_logs',
-  'Fetch deployment or runtime logs for a specific deployment from Vercel or Railway.',
+  'Fetch deployment or runtime logs for a specific deployment from Vercel or Railway. Omit deployment_id to auto-fetch logs for the latest deployment (requires project_id).',
   {
     provider: z.enum(['vercel', 'railway']).describe('Deployment provider'),
+    project_id: z
+      .string()
+      .optional()
+      .describe('Project ID or name — required when deployment_id is omitted, to auto-fetch the latest deployment'),
     deployment_id: z
       .string()
       .optional()
-      .describe('Deployment ID from deploy_status or trigger_deploy'),
+      .describe('Deployment ID from deploy_status or trigger_deploy (omit to use latest deployment)'),
     lines: z.number().int().positive().optional().describe('Maximum lines to return (default: 100)'),
   },
   async (args) => {
@@ -143,6 +147,10 @@ server.tool(
   '[Pro] Correlate Sentry errors with recent deployments to identify the probable cause of an incident. Returns a timeline and confidence-scored correlations.',
   {
     project_slug: z.string().describe('Sentry project slug'),
+    vercel_project_id: z
+      .string()
+      .optional()
+      .describe('Vercel project ID or name (required for deployment correlation; defaults to project_slug if omitted)'),
     timeframe: z
       .enum(['1h', '6h', '24h', '7d'])
       .describe('Time window to analyse for the incident'),
@@ -202,6 +210,10 @@ server.tool(
   '[Pro] Compare environment variables across two or more environments on Vercel or Railway. Returns a diff showing which keys are missing — values are never exposed.',
   {
     provider: z.enum(['vercel', 'railway']).describe('Deployment provider'),
+    project_id: z
+      .string()
+      .optional()
+      .describe('Project ID or name on the provider (recommended — when omitted, each environment name is used as the project identifier)'),
     environments: z
       .array(z.string())
       .min(2)

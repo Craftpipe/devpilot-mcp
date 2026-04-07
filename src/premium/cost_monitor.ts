@@ -7,7 +7,7 @@
 import { requirePro } from "./gate.js";
 import { VercelAdapter } from "../adapters/vercel.js";
 import { RailwayAdapter } from "../adapters/railway.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { CostReport } from "../types.js";
 
 export interface CostMonitorInput {
@@ -26,7 +26,7 @@ export async function costMonitor(
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
   requirePro("cost_monitor");
 
-  const audit = new AuditLog();
+  const audit = getAuditLog();
   const start = Date.now();
   const timeframe = input.timeframe ?? "30d";
 
@@ -75,7 +75,5 @@ export async function costMonitor(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }

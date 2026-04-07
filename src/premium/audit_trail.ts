@@ -5,7 +5,7 @@
  */
 
 import { requirePro } from "./gate.js";
-import { AuditLog } from "../lib/audit.js";
+import { getAuditLog } from "../lib/audit.js";
 import type { AuditEntry } from "../types.js";
 
 export interface AuditTrailInput {
@@ -26,8 +26,8 @@ export async function auditTrail(
 ): Promise<{ content: [{ type: "text"; text: string }] }> {
   requirePro("audit_trail");
 
-  // Use a dedicated audit instance for the query; also writes a log of this query
-  const audit = new AuditLog();
+  // Use the shared audit singleton for the query; also writes a log of this query
+  const audit = getAuditLog();
   const start = Date.now();
 
   try {
@@ -89,7 +89,5 @@ export async function auditTrail(
     });
 
     throw err;
-  } finally {
-    audit.close();
   }
 }
